@@ -1,0 +1,14 @@
+{
+  "name": "you-like-that",
+  "version": "1.0.0",
+  "description": "You Like That - CIS 4004 MERN Term Project",
+  "scripts": {
+    "dev":   "concurrently -n SERVER,CLIENT -c blue,green \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "seed":  "npm run seed --prefix server",
+    "fetch": "npm run fetch --prefix server",
+    "setup": "npm install --prefix server && npm install --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
