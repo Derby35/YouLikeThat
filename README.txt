@@ -77,3 +77,6 @@ TROUBLESHOOTING
 
 "Cannot find module" errors — you probably skipped npm run setup.
   Run it again from the YouLikeThat folder: npm run setup
+
+"MongoDB seg fault" errors on Linux - utilize Docker and
+MongoDB Versions 4.4
