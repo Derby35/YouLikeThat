@@ -80,3 +80,14 @@ TROUBLESHOOTING
 
 "MongoDB seg fault" errors on Linux - utilize Docker and
 MongoDB Versions 4.4
+
+
+MONGODB COLLECTIONS
+-------------------
+The app uses the following 5 collections in MongoDB:
+
+  users             — accounts (username, hashed password, role)
+  players           — NFL player profiles (name, position, team, headshot)
+  stats             — 2024 season stats per player (yards, TDs, games played)
+  watchlists        — user-created watchlists (name, owner)
+  watchlistplayers  — links watchlists to players (many-to-many)
