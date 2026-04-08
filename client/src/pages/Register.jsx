@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ParticleNet from '../components/ParticleNet';
 
 const Register = () => {
   const [form, setForm]       = useState({ username: '', password: '', confirm: '' });
@@ -31,6 +32,16 @@ const Register = () => {
 
   return (
     <div className="auth-page">
+      <ParticleNet
+        color="59,130,246"
+        dotAlpha={0.38}
+        lineAlpha={0.13}
+        count={50}
+        connect={160}
+        repelR={110}
+        repelF={2.2}
+        zIndex={0}
+      />
       <div className="auth-card">
         <div className="auth-logo">Stat<span>Blitz</span></div>
         <h2>Create account</h2>
