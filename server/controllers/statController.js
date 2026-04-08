@@ -14,7 +14,8 @@ const getAllStats = async (req, res) => {
 const getStatsByPlayer = async (req, res) => {
   try {
     const stats = await Stat.find({ player: req.params.playerId })
-      .populate('player', 'name position teamAbbr');
+      .populate('player', 'name position teamAbbr')
+      .sort({ season: -1 });
     res.json(stats);
   } catch (err) {
     res.status(500).json({ message: err.message });

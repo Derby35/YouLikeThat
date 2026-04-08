@@ -4,6 +4,7 @@ import api from '../services/api';
 
 /* ─── Constants ─────────────────────────────────────────── */
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
+const SEASON_TABS = [2024, 2023, 2022, 2021];
 
 const NFL_TEAMS = [
   { abbr: 'ARI', name: 'Arizona Cardinals' },    { abbr: 'ATL', name: 'Atlanta Falcons' },
@@ -24,18 +25,17 @@ const NFL_TEAMS = [
   { abbr: 'TEN', name: 'Tennessee Titans' },      { abbr: 'WSH', name: 'Washington Commanders' },
 ];
 
-/* Position-specific stat groups — shown/hidden based on selected position */
 const STAT_DEFS = {
   QB: {
     Passing:  [
-      { key: 'gamesPlayed',   label: 'Games Played' },
-      { key: 'passingYards',  label: 'Pass Yards'   },
-      { key: 'passingTDs',    label: 'Pass TDs'     },
-      { key: 'interceptions', label: 'Interceptions'},
+      { key: 'gamesPlayed',   label: 'Games Played'  },
+      { key: 'passingYards',  label: 'Pass Yards'    },
+      { key: 'passingTDs',    label: 'Pass TDs'      },
+      { key: 'interceptions', label: 'Interceptions' },
     ],
     Rushing: [
-      { key: 'rushingYards',  label: 'Rush Yards'   },
-      { key: 'rushingTDs',    label: 'Rush TDs'     },
+      { key: 'rushingYards',  label: 'Rush Yards'    },
+      { key: 'rushingTDs',    label: 'Rush TDs'      },
     ],
   },
   RB: {
@@ -76,9 +76,25 @@ const STAT_DEFS = {
   },
 };
 
-const EMPTY_STATS = {
+const EMPTY_STAT_FORM = {
+  inactive: true,
   gamesPlayed: 0, passingYards: 0, passingTDs: 0, interceptions: 0,
   rushingYards: 0, rushingTDs: 0, receivingYards: 0, receivingTDs: 0, receptions: 0,
+};
+
+const buildEmptySeasonForms = () => {
+  const obj = {};
+  for (const y of SEASON_TABS) obj[y] = { ...EMPTY_STAT_FORM };
+  return obj;
+};
+
+/* ── PPR calculator ── */
+const calcPPR = (pos, sf) => {
+  if (sf.inactive) return 0;
+  const v = k => Number(sf[k]) || 0;
+  if (pos === 'QB') return +(v('passingYards')*0.04+v('passingTDs')*4-v('interceptions')*2+v('rushingYards')*0.1+v('rushingTDs')*6).toFixed(1);
+  if (pos === 'RB') return +(v('rushingYards')*0.1+v('rushingTDs')*6+v('receptions')+v('receivingYards')*0.1+v('receivingTDs')*6).toFixed(1);
+  return +(v('receptions')+v('receivingYards')*0.1+v('receivingTDs')*6+v('rushingYards')*0.1+v('rushingTDs')*6).toFixed(1);
 };
 
 /* ─── EditPlayer Page ────────────────────────────────────── */
@@ -86,26 +102,27 @@ const EditPlayer = () => {
   const { id }   = useParams();
   const navigate = useNavigate();
 
-  /* loading / error */
-  const [loading, setLoading] = useState(true);
-  const [pageErr, setPageErr] = useState('');
-  const [saving,  setSaving]  = useState(false);
-  const [toast,   setToast]   = useState(null); // { type, msg }
+  const [loading,  setLoading]  = useState(true);
+  const [pageErr,  setPageErr]  = useState('');
+  const [saving,   setSaving]   = useState(false);
+  const [toast,    setToast]    = useState(null);
 
-  /* player data */
   const [playerName, setPlayerName] = useState('');
-  const [statId,     setStatId]     = useState(null);
-
-  /* forms */
-  const [form,     setForm]     = useState({ name: '', position: 'QB', jerseyNumber: '', teamAbbr: '', age: '', headshotUrl: '', espnId: '' });
-  const [statForm, setStatForm] = useState({ ...EMPTY_STATS });
-
-  /* originals for change-detection */
-  const [origForm,     setOrigForm]     = useState(null);
-  const [origStatForm, setOrigStatForm] = useState(null);
-
-  /* headshot preview state */
   const [imgBroken,  setImgBroken]  = useState(false);
+
+  /* Player identity form */
+  const [form,     setForm]     = useState({ name: '', position: 'QB', jerseyNumber: '', teamAbbr: '', age: '', headshotUrl: '', espnId: '' });
+  const [origForm, setOrigForm] = useState(null);
+
+  /* Season forms: keyed by year */
+  const [seasonForms,     setSeasonForms]     = useState(buildEmptySeasonForms());
+  const [origSeasonForms, setOrigSeasonForms] = useState(buildEmptySeasonForms());
+
+  /* Active season tab */
+  const [activeTab, setActiveTab] = useState(2024);
+
+  /* Clear confirmation per tab */
+  const [clearConfirm, setClearConfirm] = useState(null); // year or null
 
   /* ── Load ── */
   useEffect(() => {
@@ -131,27 +148,26 @@ const EditPlayer = () => {
         setForm(pf);
         setOrigForm(pf);
 
-        const statRecords = sRes.data;
-        if (statRecords.length > 0) {
-          const s  = statRecords[0];
-          setStatId(s._id);
-          const sf = {
-            gamesPlayed:   s.gamesPlayed   ?? 0,
-            passingYards:  s.passingYards  ?? 0,
-            passingTDs:    s.passingTDs    ?? 0,
-            interceptions: s.interceptions ?? 0,
-            rushingYards:  s.rushingYards  ?? 0,
-            rushingTDs:    s.rushingTDs    ?? 0,
-            receivingYards:s.receivingYards?? 0,
-            receivingTDs:  s.receivingTDs  ?? 0,
-            receptions:    s.receptions    ?? 0,
-          };
-          setStatForm(sf);
-          setOrigStatForm(sf);
-        } else {
-          setStatForm({ ...EMPTY_STATS });
-          setOrigStatForm({ ...EMPTY_STATS });
+        /* Build season forms from stat records */
+        const newForms = buildEmptySeasonForms();
+        for (const s of sRes.data) {
+          if (SEASON_TABS.includes(s.season)) {
+            newForms[s.season] = {
+              inactive:      false,
+              gamesPlayed:   s.gamesPlayed   ?? 0,
+              passingYards:  s.passingYards  ?? 0,
+              passingTDs:    s.passingTDs    ?? 0,
+              interceptions: s.interceptions ?? 0,
+              rushingYards:  s.rushingYards  ?? 0,
+              rushingTDs:    s.rushingTDs    ?? 0,
+              receivingYards:s.receivingYards?? 0,
+              receivingTDs:  s.receivingTDs  ?? 0,
+              receptions:    s.receptions    ?? 0,
+            };
+          }
         }
+        setSeasonForms(newForms);
+        setOrigSeasonForms(JSON.parse(JSON.stringify(newForms)));
       } catch {
         setPageErr('Failed to load player data. They may have been deleted.');
       } finally {
@@ -161,7 +177,7 @@ const EditPlayer = () => {
     load();
   }, [id]);
 
-  /* ── Toast helper ── */
+  /* ── Toast ── */
   const showToast = useCallback((type, msg) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4500);
@@ -179,22 +195,29 @@ const EditPlayer = () => {
         jerseyNumber: form.jerseyNumber !== '' ? Number(form.jerseyNumber) : undefined,
         age:          form.age          !== '' ? Number(form.age)          : undefined,
       };
-      const statsPayload = Object.fromEntries(
-        Object.entries(statForm).map(([k, v]) => [k, Number(v) || 0])
-      );
 
-      await api.put(`/api/players/${id}`, playerPayload);
+      const statsArray = SEASON_TABS.map(year => {
+        const sf = seasonForms[year];
+        if (sf.inactive) return { season: year, inactive: true };
+        return {
+          season:        year,
+          inactive:      false,
+          gamesPlayed:   Number(sf.gamesPlayed)   || 0,
+          passingYards:  Number(sf.passingYards)  || 0,
+          passingTDs:    Number(sf.passingTDs)    || 0,
+          interceptions: Number(sf.interceptions) || 0,
+          rushingYards:  Number(sf.rushingYards)  || 0,
+          rushingTDs:    Number(sf.rushingTDs)    || 0,
+          receivingYards:Number(sf.receivingYards)|| 0,
+          receivingTDs:  Number(sf.receivingTDs)  || 0,
+          receptions:    Number(sf.receptions)    || 0,
+        };
+      });
 
-      if (statId) {
-        await api.put(`/api/stats/${statId}`, { ...statsPayload, season: 2024 });
-      } else {
-        const r = await api.post('/api/stats', { ...statsPayload, player: id, season: 2024 });
-        setStatId(r.data._id);
-      }
+      await api.put(`/api/players/${id}/full`, { player: playerPayload, stats: statsArray });
 
-      /* update originals so change indicators reset */
       setOrigForm({ ...form });
-      setOrigStatForm({ ...statForm });
+      setOrigSeasonForms(JSON.parse(JSON.stringify(seasonForms)));
       setPlayerName(form.name);
       showToast('success', 'Player updated successfully');
     } catch (err) {
@@ -204,15 +227,41 @@ const EditPlayer = () => {
     }
   };
 
-  /* ── Helpers ── */
-  const pChanged  = (key) => origForm     && String(form[key])     !== String(origForm[key]     ?? '');
-  const sChanged  = (key) => origStatForm && String(statForm[key]) !== String(origStatForm[key] ?? '');
+  /* ── Change detection ── */
+  const pChanged = (key) => origForm && String(form[key]) !== String(origForm[key] ?? '');
+  const sChanged = (year, key) =>
+    origSeasonForms &&
+    String(seasonForms[year]?.[key]) !== String(origSeasonForms[year]?.[key] ?? '');
   const hasChanges = origForm && (
     Object.keys(form).some(pChanged) ||
-    Object.keys(statForm).some(sChanged)
+    SEASON_TABS.some(y => Object.keys(EMPTY_STAT_FORM).some(k => sChanged(y, k)))
   );
 
+  /* ── Update a single season field ── */
+  const updateSeason = (year, key, val) => {
+    setSeasonForms(prev => ({
+      ...prev,
+      [year]: { ...prev[year], [key]: val },
+    }));
+  };
+
+  /* ── Clear season ── */
+  const handleClear = (year) => {
+    if (clearConfirm === year) {
+      setSeasonForms(prev => ({
+        ...prev,
+        [year]: { ...EMPTY_STAT_FORM, inactive: prev[year].inactive },
+      }));
+      setClearConfirm(null);
+    } else {
+      setClearConfirm(year);
+      setTimeout(() => setClearConfirm(null), 3500);
+    }
+  };
+
+  const sf   = seasonForms[activeTab] || EMPTY_STAT_FORM;
   const statDefs = STAT_DEFS[form.position] || STAT_DEFS.QB;
+  const livePPR  = calcPPR(form.position, sf);
 
   /* ── Render ── */
   if (loading) return (
@@ -226,7 +275,7 @@ const EditPlayer = () => {
     <div className="ep-loading-screen">
       <div className="ep-load-error">{pageErr}</div>
       <button className="ep-btn-cancel" onClick={() => navigate('/admin')} style={{ marginTop: '16px' }}>
-        ← Back to Admin
+        Back to Admin
       </button>
     </div>
   );
@@ -265,9 +314,7 @@ const EditPlayer = () => {
         <div className="ep-page-header-actions">
           <button className="ep-btn-cancel" onClick={() => navigate('/admin')}>Cancel</button>
           <button className="ep-btn-save" onClick={handleSave} disabled={saving}>
-            {saving
-              ? <><span className="ep-spinner" /> Saving…</>
-              : '✓ Save All Changes'}
+            {saving ? <><span className="ep-spinner" /> Saving…</> : '✓ Save All Changes'}
           </button>
         </div>
       </div>
@@ -286,8 +333,6 @@ const EditPlayer = () => {
           </div>
 
           <div className="ep-identity-layout">
-
-            {/* Avatar column */}
             <div className="ep-avatar-col">
               <div className="ep-avatar-wrap">
                 {form.headshotUrl && !imgBroken ? (
@@ -311,11 +356,9 @@ const EditPlayer = () => {
               )}
             </div>
 
-            {/* Fields grid */}
             <div className="ep-identity-fields">
               <div className="ep-field-grid">
 
-                {/* Name */}
                 <div className={`ep-field ep-field-full ${pChanged('name') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">Full Name</label>
                   <input
@@ -326,7 +369,6 @@ const EditPlayer = () => {
                   />
                 </div>
 
-                {/* Position */}
                 <div className={`ep-field ${pChanged('position') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">Position</label>
                   <select
@@ -338,7 +380,6 @@ const EditPlayer = () => {
                   </select>
                 </div>
 
-                {/* Jersey */}
                 <div className={`ep-field ${pChanged('jerseyNumber') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">Jersey #</label>
                   <input
@@ -350,7 +391,6 @@ const EditPlayer = () => {
                   />
                 </div>
 
-                {/* Team */}
                 <div className={`ep-field ${pChanged('teamAbbr') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">Team</label>
                   <select
@@ -365,7 +405,6 @@ const EditPlayer = () => {
                   </select>
                 </div>
 
-                {/* Age */}
                 <div className={`ep-field ${pChanged('age') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">Age</label>
                   <input
@@ -377,7 +416,6 @@ const EditPlayer = () => {
                   />
                 </div>
 
-                {/* Headshot URL */}
                 <div className={`ep-field ep-field-full ${pChanged('headshotUrl') ? 'ep-field-changed' : ''}`}>
                   <label className="ep-label">
                     Headshot URL
@@ -408,41 +446,96 @@ const EditPlayer = () => {
           </div>
         </div>
 
-        {/* ══ Card 2 — Season Stats ══ */}
+        {/* ══ Card 2 — Multi-Season Stats ══ */}
         <div className="ep-card">
           <div className="ep-card-header">
             <div className="ep-card-icon">📊</div>
             <div>
-              <div className="ep-card-title">2024 Season Stats</div>
-              <div className="ep-card-sub">
-                Showing {form.position} stat groups — changes position when you update position above
-              </div>
+              <div className="ep-card-title">Season Stats</div>
+              <div className="ep-card-sub">Edit stats for each season — toggle inactive to remove a season</div>
             </div>
           </div>
 
-          <div className="ep-stat-sections">
-            {Object.entries(statDefs).map(([groupName, fields]) => (
-              <div key={groupName} className="ep-stat-section">
-                <div className="ep-stat-section-label">{groupName.toUpperCase()}</div>
-                <div className="ep-stat-field-grid">
-                  {fields.map(f => (
-                    <div
-                      key={f.key}
-                      className={`ep-stat-field ${sChanged(f.key) ? 'ep-field-changed' : ''}`}
-                    >
-                      <label className="ep-label">{f.label}</label>
-                      <input
-                        className="ep-input ep-stat-input"
-                        type="number"
-                        min={0}
-                        value={statForm[f.key]}
-                        onChange={e => setStatForm({ ...statForm, [f.key]: e.target.value })}
-                      />
-                    </div>
-                  ))}
-                </div>
+          {/* Season Tabs */}
+          <div className="ep-season-tabs">
+            {SEASON_TABS.map(year => {
+              const yf = seasonForms[year];
+              const hasData = yf && !yf.inactive;
+              const anyChanged = Object.keys(EMPTY_STAT_FORM).some(k => sChanged(year, k));
+              return (
+                <button
+                  key={year}
+                  className={`ep-season-tab${activeTab === year ? ' active' : ''}`}
+                  onClick={() => { setActiveTab(year); setClearConfirm(null); }}
+                >
+                  {year}
+                  {hasData && <span className="ep-tab-dot" />}
+                  {anyChanged && <span className="ep-tab-changed-dot" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active season content */}
+          <div className="ep-season-content">
+
+            {/* Controls row */}
+            <div className="ep-season-controls">
+              <label className="ep-season-inactive-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!sf.inactive}
+                  onChange={e => updateSeason(activeTab, 'inactive', e.target.checked)}
+                />
+                <span>Not Active This Season</span>
+                {sf.inactive && <span className="ep-inactive-badge">INACTIVE</span>}
+              </label>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {clearConfirm === activeTab ? (
+                  <span className="ep-clear-confirm" onClick={() => handleClear(activeTab)}>
+                    Confirm clear?
+                  </span>
+                ) : (
+                  <button className="ep-clear-btn" onClick={() => handleClear(activeTab)}>
+                    Clear Season
+                  </button>
+                )}
               </div>
-            ))}
+            </div>
+
+            {/* Live PPR */}
+            <div className="ep-ppr-preview">
+              Fantasy Pts (PPR):&nbsp;
+              <span className="ep-ppr-value">{livePPR.toFixed(1)}</span>
+            </div>
+
+            {/* Stat fields */}
+            <div className={`ep-stat-sections${sf.inactive ? ' ep-stat-inactive' : ''}`}>
+              {Object.entries(statDefs).map(([groupName, fields]) => (
+                <div key={groupName} className="ep-stat-section">
+                  <div className="ep-stat-section-label">{groupName.toUpperCase()}</div>
+                  <div className="ep-stat-field-grid">
+                    {fields.map(f => (
+                      <div
+                        key={f.key}
+                        className={`ep-stat-field ${sChanged(activeTab, f.key) ? 'ep-field-changed' : ''}`}
+                      >
+                        <label className="ep-label">{f.label}</label>
+                        <input
+                          className="ep-input ep-stat-input"
+                          type="number"
+                          min={0}
+                          value={sf[f.key] ?? 0}
+                          onChange={e => updateSeason(activeTab, f.key, e.target.value)}
+                          disabled={sf.inactive}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
           </div>
         </div>
 
@@ -459,9 +552,7 @@ const EditPlayer = () => {
         <div className="ep-footer-actions">
           <button className="ep-btn-cancel" onClick={() => navigate('/admin')}>← Cancel</button>
           <button className="ep-btn-save" onClick={handleSave} disabled={saving}>
-            {saving
-              ? <><span className="ep-spinner" /> Saving…</>
-              : '✓ Save All Changes'}
+            {saving ? <><span className="ep-spinner" /> Saving…</> : '✓ Save All Changes'}
           </button>
         </div>
       </div>

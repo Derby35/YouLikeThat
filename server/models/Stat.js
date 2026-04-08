@@ -15,4 +15,6 @@ const statSchema = new mongoose.Schema({
   fantasyPoints:    { type: Number, default: 0 },
 });
 
+statSchema.index({ player: 1, season: 1 }, { unique: true });
+
 module.exports = mongoose.model('Stat', statSchema);

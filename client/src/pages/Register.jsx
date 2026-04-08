@@ -33,13 +33,13 @@ const Register = () => {
   return (
     <div className="auth-page">
       <ParticleNet
-        color="59,130,246"
-        dotAlpha={0.38}
-        lineAlpha={0.13}
-        count={50}
-        connect={160}
-        repelR={110}
-        repelF={2.2}
+        color="249,115,22"
+        dotAlpha={0.62}
+        lineAlpha={0.20}
+        count={58}
+        connect={140}
+        repelR={100}
+        repelF={2.4}
         zIndex={0}
       />
       <div className="auth-card">

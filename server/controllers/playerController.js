@@ -298,6 +298,64 @@ const deletePlayer = async (req, res) => {
   }
 };
 
+/* ────────────────────────────────────────────────────
+   GET /api/players/:id/stats
+──────────────────────────────────────────────────── */
+const getPlayerAllStats = async (req, res) => {
+  try {
+    const stats = await Stat.find({ player: req.params.id }).sort({ season: -1 });
+    res.json(stats);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+/* ────────────────────────────────────────────────────
+   GET /api/players/:id/stats/:year
+──────────────────────────────────────────────────── */
+const getPlayerStatsByYear = async (req, res) => {
+  try {
+    const stat = await Stat.findOne({ player: req.params.id, season: Number(req.params.year) });
+    if (!stat) return res.status(404).json({ message: 'No stats for that season' });
+    res.json(stat);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+/* ────────────────────────────────────────────────────
+   PUT /api/players/:id/full — batch update player + all season stats
+──────────────────────────────────────────────────── */
+const adminBatchUpdate = async (req, res) => {
+  try {
+    const { player: playerData, stats: statsArray } = req.body;
+
+    const player = await Player.findByIdAndUpdate(
+      req.params.id,
+      { ...playerData },
+      { new: true, runValidators: true }
+    );
+    if (!player) return res.status(404).json({ message: 'Player not found' });
+
+    const results = [];
+    if (Array.isArray(statsArray)) {
+      for (const row of statsArray) {
+        const { season, inactive, ...statFields } = row;
+        if (inactive) {
+          await Stat.deleteOne({ player: req.params.id, season: Number(season) });
+          results.push({ season, action: 'deleted' });
+        } else {
+          statFields.fantasyPoints = parseFloat(calcFantasyPoints(statFields).toFixed(1));
+          const saved = await Stat.findOneAndUpdate(
+            { player: req.params.id, season: Number(season) },
+            { ...statFields, player: req.params.id, season: Number(season) },
+            { upsert: true, new: true }
+          );
+          results.push({ season, action: 'upserted', id: saved._id });
+        }
+      }
+    }
+
+    res.json({ player, stats: results });
+  } catch (err) { res.status(400).json({ message: err.message }); }
+};
+
 module.exports = {
   lookupEspnPlayer,
   getAllPlayers,
@@ -305,4 +363,7 @@ module.exports = {
   createPlayer,
   updatePlayer,
   deletePlayer,
+  getPlayerAllStats,
+  getPlayerStatsByYear,
+  adminBatchUpdate,
 };
