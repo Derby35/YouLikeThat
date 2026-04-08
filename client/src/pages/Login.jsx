@@ -320,12 +320,6 @@ const Login = () => {
             </button>
           </form>
 
-          <div className="demo-box">
-            <div className="demo-box-label">Demo Accounts</div>
-            Admin: <strong>admin</strong> / <strong>Admin123!</strong><br />
-            User:&nbsp; <strong>john_doe</strong> / <strong>Password1!</strong>
-          </div>
-
           <p className="auth-footer">
             No account? <Link to="/register">Create one</Link>
           </p>
