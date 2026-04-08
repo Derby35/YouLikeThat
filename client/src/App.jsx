@@ -11,6 +11,7 @@ import PlayerDetail from './pages/PlayerDetail';
 import Watchlists from './pages/Watchlists';
 import WatchlistDetail from './pages/WatchlistDetail';
 import Admin from './pages/Admin';
+import EditPlayer from './pages/EditPlayer';
 import ManageUsers from './pages/ManageUsers';
 import Settings from './pages/Settings';
 
@@ -33,7 +34,8 @@ const App = () => (
       <Route path="players/:id"    element={<PlayerDetail />} />
       <Route path="watchlists"     element={<Watchlists />} />
       <Route path="watchlists/:id" element={<WatchlistDetail />} />
-      <Route path="admin"          element={<AdminRoute><Admin /></AdminRoute>} />
+      <Route path="admin"                       element={<AdminRoute><Admin /></AdminRoute>} />
+      <Route path="admin/players/:id/edit"  element={<AdminRoute><EditPlayer /></AdminRoute>} />
       <Route path="manage-users"   element={<AdminRoute><ManageUsers /></AdminRoute>} />
       <Route path="settings"       element={<Settings />} />
     </Route>

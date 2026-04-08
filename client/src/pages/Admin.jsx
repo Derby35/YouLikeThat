@@ -1,372 +1,451 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import ConfirmModal from '../components/ConfirmModal';
 
-const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+/* ─── Constants ─────────────────────────────────────────── */
+const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 
-const emptyPlayer = { name: '', position: 'QB', jerseyNumber: '', teamName: '', teamAbbr: '', age: '' };
-const emptyStat   = { player: '', gamesPlayed: '', passingYards: '', passingTDs: '', interceptions: '', rushingYards: '', rushingTDs: '', receivingYards: '', receivingTDs: '', receptions: '', fantasyPoints: '' };
+const NFL_TEAMS = [
+  { abbr: 'ARI', name: 'Arizona Cardinals' },    { abbr: 'ATL', name: 'Atlanta Falcons' },
+  { abbr: 'BAL', name: 'Baltimore Ravens' },      { abbr: 'BUF', name: 'Buffalo Bills' },
+  { abbr: 'CAR', name: 'Carolina Panthers' },     { abbr: 'CHI', name: 'Chicago Bears' },
+  { abbr: 'CIN', name: 'Cincinnati Bengals' },    { abbr: 'CLE', name: 'Cleveland Browns' },
+  { abbr: 'DAL', name: 'Dallas Cowboys' },        { abbr: 'DEN', name: 'Denver Broncos' },
+  { abbr: 'DET', name: 'Detroit Lions' },         { abbr: 'GB',  name: 'Green Bay Packers' },
+  { abbr: 'HOU', name: 'Houston Texans' },        { abbr: 'IND', name: 'Indianapolis Colts' },
+  { abbr: 'JAX', name: 'Jacksonville Jaguars' },  { abbr: 'KC',  name: 'Kansas City Chiefs' },
+  { abbr: 'LAC', name: 'Los Angeles Chargers' },  { abbr: 'LAR', name: 'Los Angeles Rams' },
+  { abbr: 'LV',  name: 'Las Vegas Raiders' },     { abbr: 'MIA', name: 'Miami Dolphins' },
+  { abbr: 'MIN', name: 'Minnesota Vikings' },     { abbr: 'NE',  name: 'New England Patriots' },
+  { abbr: 'NO',  name: 'New Orleans Saints' },    { abbr: 'NYG', name: 'New York Giants' },
+  { abbr: 'NYJ', name: 'New York Jets' },         { abbr: 'PHI', name: 'Philadelphia Eagles' },
+  { abbr: 'PIT', name: 'Pittsburgh Steelers' },   { abbr: 'SEA', name: 'Seattle Seahawks' },
+  { abbr: 'SF',  name: 'San Francisco 49ers' },   { abbr: 'TB',  name: 'Tampa Bay Buccaneers' },
+  { abbr: 'TEN', name: 'Tennessee Titans' },      { abbr: 'WSH', name: 'Washington Commanders' },
+];
 
-// players tab
-const PlayersTab = () => {
-  const [players,     setPlayers]     = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [showModal,   setShowModal]   = useState(false);
-  const [form,        setForm]        = useState(emptyPlayer);
-  const [editId,      setEditId]      = useState(null);
-  const [deleteTarget,setDeleteTarget]= useState(null);
-  const [error,       setError]       = useState('');
+const EMPTY_PLAYER = { name: '', position: 'QB', jerseyNumber: '', teamAbbr: '', age: '', headshotUrl: '', espnId: '' };
+const EMPTY_STATS  = { gamesPlayed: '', passingYards: '', passingTDs: '', interceptions: '', rushingYards: '', rushingTDs: '', receivingYards: '', receivingTDs: '', receptions: '' };
 
-  const load = async () => {
-    const res = await api.get('/api/players');
-    setPlayers(res.data);
-    setLoading(false);
-  };
+const STAT_GROUPS = {
+  QB: [
+    { key: 'gamesPlayed',   label: 'Games Played', icon: '🏟' },
+    { key: 'passingYards',  label: 'Pass Yards',    icon: '🏈', group: 'Passing' },
+    { key: 'passingTDs',    label: 'Pass TDs',      icon: '✦',  group: 'Passing' },
+    { key: 'interceptions', label: 'Interceptions', icon: '⚡', group: 'Passing' },
+    { key: 'rushingYards',  label: 'Rush Yards',    icon: '💨', group: 'Rushing' },
+    { key: 'rushingTDs',    label: 'Rush TDs',      icon: '✦',  group: 'Rushing' },
+  ],
+  RB: [
+    { key: 'gamesPlayed',    label: 'Games Played', icon: '🏟' },
+    { key: 'rushingYards',   label: 'Rush Yards',   icon: '💨', group: 'Rushing' },
+    { key: 'rushingTDs',     label: 'Rush TDs',     icon: '✦',  group: 'Rushing' },
+    { key: 'receptions',     label: 'Receptions',   icon: '🤲', group: 'Receiving' },
+    { key: 'receivingYards', label: 'Rec Yards',    icon: '📏', group: 'Receiving' },
+    { key: 'receivingTDs',   label: 'Rec TDs',      icon: '✦',  group: 'Receiving' },
+  ],
+  WR: [
+    { key: 'gamesPlayed',    label: 'Games Played', icon: '🏟' },
+    { key: 'receptions',     label: 'Receptions',   icon: '🤲', group: 'Receiving' },
+    { key: 'receivingYards', label: 'Rec Yards',    icon: '📏', group: 'Receiving' },
+    { key: 'receivingTDs',   label: 'Rec TDs',      icon: '✦',  group: 'Receiving' },
+  ],
+  TE: [
+    { key: 'gamesPlayed',    label: 'Games Played', icon: '🏟' },
+    { key: 'receptions',     label: 'Receptions',   icon: '🤲', group: 'Receiving' },
+    { key: 'receivingYards', label: 'Rec Yards',    icon: '📏', group: 'Receiving' },
+    { key: 'receivingTDs',   label: 'Rec TDs',      icon: '✦',  group: 'Receiving' },
+  ],
+};
 
-  useEffect(() => { load(); }, []);
+/* ─── Add Player Modal (create-only, 2-step) ─────────────── */
+const AddPlayerModal = ({ onClose, onSaved }) => {
+  const [step,      setStep]      = useState(1);
+  const [form,      setForm]      = useState({ ...EMPTY_PLAYER });
+  const [statForm,  setStatForm]  = useState({ ...EMPTY_STATS });
+  const [espnQuery, setEspnQuery] = useState('');
+  const [espnState, setEspnState] = useState('idle');
+  const [espnMsg,   setEspnMsg]   = useState('');
+  const [error,     setError]     = useState('');
+  const [saving,    setSaving]    = useState(false);
 
-  const openCreate = () => { setForm(emptyPlayer); setEditId(null); setError(''); setShowModal(true); };
-  const openEdit   = (p)  => { setForm({ name: p.name, position: p.position, jerseyNumber: p.jerseyNumber || '', teamName: p.teamName || '', teamAbbr: p.teamAbbr || '', age: p.age || '' }); setEditId(p._id); setError(''); setShowModal(true); };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
+  const handleEspnLookup = async () => {
+    if (!espnQuery.trim()) return;
+    setEspnState('loading'); setEspnMsg('');
     try {
-      const payload = { ...form, jerseyNumber: form.jerseyNumber || undefined, age: form.age || undefined };
-      if (editId) {
-        await api.put(`/api/players/${editId}`, payload);
-      } else {
-        await api.post('/api/players', payload);
+      const res = await api.get(`/api/players/espn-lookup?name=${encodeURIComponent(espnQuery.trim())}`);
+      const d = res.data;
+      setForm(prev => ({
+        ...prev,
+        name:         d.name         || prev.name,
+        position:     POSITIONS.includes(d.position) ? d.position : prev.position,
+        jerseyNumber: d.jerseyNumber != null ? d.jerseyNumber : prev.jerseyNumber,
+        teamAbbr:     d.teamAbbr     || prev.teamAbbr,
+        age:          d.age          != null ? d.age : prev.age,
+        headshotUrl:  d.headshotUrl  || prev.headshotUrl,
+        espnId:       d.espnId       || prev.espnId,
+      }));
+      if (d.stats && Object.keys(d.stats).length) {
+        setStatForm(prev => ({
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(d.stats)
+              .filter(([k]) => k in EMPTY_STATS)
+              .map(([k, v]) => [k, v ?? ''])
+          ),
+        }));
       }
-      setShowModal(false);
-      load();
+      setEspnState('success');
+      setEspnMsg(`Found: ${d.name || espnQuery}`);
     } catch (err) {
-      setError(err.response?.data?.message || 'Save failed.');
+      setEspnState('error');
+      setEspnMsg(err.response?.data?.message || 'Not found — fill in manually.');
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    await api.delete(`/api/players/${deleteTarget}`);
-    setDeleteTarget(null);
-    load();
+  const handleSubmit = async () => {
+    setError(''); setSaving(true);
+    try {
+      const team = NFL_TEAMS.find(t => t.abbr === form.teamAbbr);
+      const payload = {
+        ...form,
+        teamName: team?.name || '',
+        jerseyNumber: Number(form.jerseyNumber) || undefined,
+        age: Number(form.age) || undefined,
+      };
+      const statsPayload = Object.fromEntries(
+        Object.entries(statForm).map(([k, v]) => [k, v === '' ? 0 : Number(v)])
+      );
+      await api.post('/api/players', { ...payload, stats: statsPayload });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Save failed.');
+    } finally { setSaving(false); }
   };
 
-  if (loading) return <div className="loading-state">Loading players...</div>;
+  const statFields = STAT_GROUPS[form.position] || STAT_GROUPS.WR;
 
   return (
-    <div>
-      {deleteTarget && (
-        <ConfirmModal
-          message="Delete this player? Their stats will remain but may become orphaned."
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
-      )}
+    <div className="ap-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="ap-modal">
 
-      {showModal && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header">
-              <h3>{editId ? 'Edit Player' : 'Add Player'}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
-            </div>
-            {error && <div className="alert-error">{error}</div>}
-            <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                  <label className="form-label">Full Name</label>
-                  <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
+        {/* Header */}
+        <div className="ap-modal-header">
+          <div className="ap-modal-avatar-placeholder">＋</div>
+          <div className="ap-modal-header-text">
+            <div className="ap-modal-title">Add New Player</div>
+          </div>
+          <button className="ap-modal-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        {/* Stepper */}
+        <div className="ap-stepper">
+          <button className={`ap-step ${step === 1 ? 'active' : step > 1 ? 'done' : ''}`} onClick={() => setStep(1)}>
+            <span className="ap-step-num">{step > 1 ? '✓' : '1'}</span>
+            <span>Player Info</span>
+          </button>
+          <div className="ap-step-line" />
+          <button className={`ap-step ${step === 2 ? 'active' : ''}`} onClick={() => step > 1 && setStep(2)}>
+            <span className="ap-step-num">2</span>
+            <span>Season Stats</span>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="ap-modal-body">
+
+          {/* Step 1 — Player Info */}
+          {step === 1 && (
+            <div>
+              <div className="ap-espn-block">
+                <div className="ap-espn-label">
+                  <span className="ap-espn-badge">ESPN</span>
+                  Auto-fill player data instantly
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Position</label>
-                  <select className="form-select" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
-                    {POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                <div className="ap-espn-row">
+                  <input
+                    className="ap-espn-input"
+                    placeholder="Search any NFL player…"
+                    value={espnQuery}
+                    onChange={e => setEspnQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleEspnLookup()}
+                  />
+                  <button
+                    className={`ap-espn-btn ${espnState === 'loading' ? 'loading' : ''}`}
+                    onClick={handleEspnLookup}
+                    disabled={espnState === 'loading' || !espnQuery.trim()}
+                  >
+                    {espnState === 'loading' ? <><span className="ap-spinner" /> Looking up…</> : 'Look Up'}
+                  </button>
+                </div>
+                {espnState === 'success' && <div className="ap-espn-status success">✓ {espnMsg} — fields populated below</div>}
+                {espnState === 'error'   && <div className="ap-espn-status error">✕ {espnMsg}</div>}
+              </div>
+
+              <div className="ap-form-grid">
+                <div className="ap-field ap-field-full">
+                  <label className="ap-label">Full Name</label>
+                  <input className="ap-input" value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="e.g. Patrick Mahomes" />
+                </div>
+                <div className="ap-field">
+                  <label className="ap-label">Position</label>
+                  <select className="ap-select" value={form.position}
+                    onChange={e => setForm({ ...form, position: e.target.value })}>
+                    {POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Jersey #</label>
-                  <input className="form-input" type="number" value={form.jerseyNumber} onChange={(e) => setForm({ ...form, jerseyNumber: e.target.value })} />
+                <div className="ap-field">
+                  <label className="ap-label">Jersey #</label>
+                  <input className="ap-input" type="number" min={1} max={99}
+                    value={form.jerseyNumber}
+                    onChange={e => setForm({ ...form, jerseyNumber: e.target.value })}
+                    placeholder="17" />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Team Name</label>
-                  <input className="form-input" placeholder="e.g. Kansas City Chiefs" value={form.teamName} onChange={(e) => setForm({ ...form, teamName: e.target.value })} />
+                <div className="ap-field">
+                  <label className="ap-label">Team</label>
+                  <select className="ap-select" value={form.teamAbbr}
+                    onChange={e => setForm({ ...form, teamAbbr: e.target.value })}>
+                    <option value="">Select team…</option>
+                    {NFL_TEAMS.map(t => (
+                      <option key={t.abbr} value={t.abbr}>{t.abbr} — {t.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Team Abbr</label>
-                  <input className="form-input" placeholder="e.g. KC" value={form.teamAbbr} onChange={(e) => setForm({ ...form, teamAbbr: e.target.value.toUpperCase() })} maxLength={4} />
+                <div className="ap-field">
+                  <label className="ap-label">Age</label>
+                  <input className="ap-input" type="number" min={18} max={50}
+                    value={form.age}
+                    onChange={e => setForm({ ...form, age: e.target.value })}
+                    placeholder="28" />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Age</label>
-                  <input className="form-input" type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} />
+                <div className="ap-field ap-field-full">
+                  <label className="ap-label">
+                    Headshot URL
+                    {form.headshotUrl && (
+                      <img src={form.headshotUrl} alt="" className="ap-headshot-preview"
+                        onError={e => e.target.style.display = 'none'} />
+                    )}
+                  </label>
+                  <input className="ap-input" value={form.headshotUrl}
+                    onChange={e => setForm({ ...form, headshotUrl: e.target.value })}
+                    placeholder="https://a.espncdn.com/…" />
                 </div>
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Player'}</button>
+            </div>
+          )}
+
+          {/* Step 2 — Stats */}
+          {step === 2 && (
+            <div>
+              <div className="ap-stats-intro">
+                <span className={`pos-badge pos-${form.position}`}>{form.position}</span>
+                &nbsp; Stat fields for <strong>{form.name || 'this player'}</strong> — 2024 Season
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <p style={{ color: 'var(--text-dim)', fontSize: '13px' }}>{players.length} players in database</p>
-        <button className="btn btn-primary" onClick={openCreate}>Add Player</button>
-      </div>
-
-      <div className="table-wrapper">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Name</th><th>Pos</th><th>Team</th><th>Jersey</th><th>Age</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No players yet.</td></tr>
-            ) : (
-              players.map((p) => (
-                <tr key={p._id}>
-                  <td style={{ fontWeight: '600' }}>{p.name}</td>
-                  <td><span className={`pos-badge pos-${p.position}`}>{p.position}</span></td>
-                  <td style={{ color: 'var(--text-dim)' }}>{p.teamAbbr || '—'}</td>
-                  <td style={{ color: 'var(--text-dim)' }}>{p.jerseyNumber ? `#${p.jerseyNumber}` : '—'}</td>
-                  <td style={{ color: 'var(--text-dim)' }}>{p.age || '—'}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Edit</button>
-                      <button className="btn btn-danger  btn-sm" onClick={() => setDeleteTarget(p._id)}>Delete</button>
+              <div className="ap-stat-grid">
+                {statFields.map((f, i) => {
+                  const isFirst = i === 0 || f.group !== statFields[i - 1]?.group;
+                  return (
+                    <div key={f.key} className={`ap-stat-field ${i === 0 ? 'ap-stat-gp' : ''}`}>
+                      {isFirst && f.group && <div className="ap-stat-group-label">{f.group}</div>}
+                      <label className="ap-label">
+                        <span className="ap-stat-icon">{f.icon}</span> {f.label}
+                      </label>
+                      <input className="ap-input ap-stat-input" type="number" min={0} placeholder="0"
+                        value={statForm[f.key]}
+                        onChange={e => setStatForm({ ...statForm, [f.key]: e.target.value })} />
                     </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {error && <div className="ap-error">{error}</div>}
+        </div>
+
+        {/* Footer */}
+        <div className="ap-modal-footer">
+          <button className="ap-btn-cancel" onClick={onClose}>Cancel</button>
+          {step === 1 && (
+            <button className="ap-btn-primary" onClick={() => {
+              if (!form.name.trim()) { setError('Player name is required.'); return; }
+              setError(''); setStep(2);
+            }}>Next: Season Stats →</button>
+          )}
+          {step === 2 && (
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="ap-btn-ghost" onClick={() => setStep(1)}>← Back</button>
+              <button className="ap-btn-primary" onClick={handleSubmit} disabled={saving}>
+                {saving ? <><span className="ap-spinner" /> Saving…</> : '＋ Add Player'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 };
 
-// stats tab
-const StatsTab = () => {
-  const [stats,       setStats]       = useState([]);
-  const [players,     setPlayers]     = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [showModal,   setShowModal]   = useState(false);
-  const [form,        setForm]        = useState(emptyStat);
-  const [editId,      setEditId]      = useState(null);
-  const [deleteTarget,setDeleteTarget]= useState(null);
-  const [error,       setError]       = useState('');
+/* ─── Main Admin Page ────────────────────────────────────── */
+const Admin = () => {
+  const navigate = useNavigate();
 
-  const load = async () => {
-    const [sRes, pRes] = await Promise.all([
-      api.get('/api/stats'),
-      api.get('/api/players'),
-    ]);
-    setStats(sRes.data);
-    setPlayers(pRes.data);
-    setLoading(false);
+  const [players,      setPlayers]      = useState([]);
+  const [loadingP,     setLoadingP]     = useState(true);
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [posFilter,    setPosFilter]    = useState('ALL');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const loadPlayers = async () => {
+    try { const r = await api.get('/api/players'); setPlayers(r.data); }
+    finally { setLoadingP(false); }
   };
 
-  useEffect(() => { load(); }, []);
-
-  const num = (v) => v === '' ? undefined : Number(v);
-
-  const openCreate = () => { setForm(emptyStat); setEditId(null); setError(''); setShowModal(true); };
-  const openEdit   = (s) => {
-    setForm({
-      player:         s.player?._id || '',
-      gamesPlayed:    s.gamesPlayed  ?? '',
-      passingYards:   s.passingYards ?? '',
-      passingTDs:     s.passingTDs   ?? '',
-      interceptions:  s.interceptions?? '',
-      rushingYards:   s.rushingYards ?? '',
-      rushingTDs:     s.rushingTDs   ?? '',
-      receivingYards: s.receivingYards ?? '',
-      receivingTDs:   s.receivingTDs   ?? '',
-      receptions:     s.receptions     ?? '',
-      fantasyPoints:  s.fantasyPoints  ?? '',
-    });
-    setEditId(s._id);
-    setError('');
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      const payload = {
-        player:         form.player,
-        season:         2024,
-        gamesPlayed:    num(form.gamesPlayed),
-        passingYards:   num(form.passingYards),
-        passingTDs:     num(form.passingTDs),
-        interceptions:  num(form.interceptions),
-        rushingYards:   num(form.rushingYards),
-        rushingTDs:     num(form.rushingTDs),
-        receivingYards: num(form.receivingYards),
-        receivingTDs:   num(form.receivingTDs),
-        receptions:     num(form.receptions),
-        fantasyPoints:  num(form.fantasyPoints),
-      };
-      if (editId) {
-        await api.put(`/api/stats/${editId}`, payload);
-      } else {
-        await api.post('/api/stats', payload);
-      }
-      setShowModal(false);
-      load();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Save failed.');
-    }
-  };
+  useEffect(() => { loadPlayers(); }, []);
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
-    await api.delete(`/api/stats/${deleteTarget}`);
+    await api.delete(`/api/players/${deleteTarget._id}`);
     setDeleteTarget(null);
-    load();
+    loadPlayers();
   };
 
-  const field = (label, key, type = 'number') => (
-    <div className="form-group">
-      <label className="form-label">{label}</label>
-      <input
-        className="form-input"
-        type={type}
-        value={form[key]}
-        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-      />
-    </div>
-  );
-
-  if (loading) return <div className="loading-state">Loading stats...</div>;
+  const filteredPlayers = players.filter(p => {
+    const matchPos    = posFilter === 'ALL' || p.position === posFilter;
+    const matchSearch = !playerSearch ||
+      p.name.toLowerCase().includes(playerSearch.toLowerCase()) ||
+      (p.teamAbbr || '').toLowerCase().includes(playerSearch.toLowerCase()) ||
+      p.position.toLowerCase().includes(playerSearch.toLowerCase());
+    return matchPos && matchSearch;
+  });
 
   return (
-    <div>
+    <div className="ap-page">
+
+      {/* Confirm delete */}
       {deleteTarget && (
         <ConfirmModal
-          message="Delete this stat record?"
+          message={`Delete ${deleteTarget.name}? Their stats and watchlist entries will be permanently removed.`}
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
 
-      {showModal && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h3>{editId ? 'Edit Stat Record' : 'Add Stat Record'}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
-            </div>
-            {error && <div className="alert-error">{error}</div>}
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Player</label>
-                <select className="form-select" value={form.player} onChange={(e) => setForm({ ...form, player: e.target.value })} required>
-                  <option value="">Select a player...</option>
-                  {players.map((p) => (
-                    <option key={p._id} value={p._id}>{p.name} ({p.position})</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 16px' }}>
-                {field('Games Played',   'gamesPlayed')}
-                {field('Passing Yards',  'passingYards')}
-                {field('Passing TDs',    'passingTDs')}
-                {field('Interceptions',  'interceptions')}
-                {field('Rushing Yards',  'rushingYards')}
-                {field('Rushing TDs',    'rushingTDs')}
-                {field('Rec Yards',      'receivingYards')}
-                {field('Rec TDs',        'receivingTDs')}
-                {field('Receptions',     'receptions')}
-                {field('Fantasy Points', 'fantasyPoints')}
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Record'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Add Player modal */}
+      {showAddModal && (
+        <AddPlayerModal
+          onClose={() => setShowAddModal(false)}
+          onSaved={loadPlayers}
+        />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <p style={{ color: 'var(--text-dim)', fontSize: '13px' }}>{stats.length} stat records in database</p>
-        <button className="btn btn-primary" onClick={openCreate}>Add Stat Record</button>
+      {/* Page header */}
+      <div className="ap-page-header">
+        <div>
+          <h1 className="ap-page-title">Admin Panel</h1>
+          <p className="ap-page-sub">2024 NFL Season — Player Management</p>
+        </div>
+        <div className="ap-page-header-stats">
+          <div className="ap-header-stat"><span>{players.length}</span>Players</div>
+          <div className="ap-header-stat"><span>{filteredPlayers.length}</span>Showing</div>
+        </div>
       </div>
 
-      <div className="table-wrapper">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Player</th><th>Pos</th><th>GP</th>
-              <th>Pass Yds</th><th>Pass TD</th>
-              <th>Rush Yds</th><th>Rush TD</th>
-              <th>Rec Yds</th><th>Rec TD</th><th>REC</th>
-              <th>Fant Pts</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stats.length === 0 ? (
-              <tr><td colSpan={12} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No stat records yet.</td></tr>
-            ) : (
-              stats.map((s) => (
-                <tr key={s._id}>
-                  <td style={{ fontWeight: '600' }}>{s.player?.name || '—'}</td>
-                  <td><span className={`pos-badge pos-${s.player?.position}`}>{s.player?.position}</span></td>
-                  <td>{s.gamesPlayed}</td>
-                  <td>{s.passingYards   || '—'}</td>
-                  <td>{s.passingTDs     || '—'}</td>
-                  <td>{s.rushingYards   || '—'}</td>
-                  <td>{s.rushingTDs     || '—'}</td>
-                  <td>{s.receivingYards || '—'}</td>
-                  <td>{s.receivingTDs   || '—'}</td>
-                  <td>{s.receptions     || '—'}</td>
-                  <td style={{ color: 'var(--accent-orange)', fontWeight: '700' }}>{s.fantasyPoints?.toFixed(1)}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(s)}>Edit</button>
-                      <button className="btn btn-danger  btn-sm" onClick={() => setDeleteTarget(s._id)}>Delete</button>
-                    </div>
-                  </td>
+      {/* ── Players Section ── */}
+      <div className="ap-section">
+        <div className="ap-section-header">
+          <div className="ap-section-title">
+            <div className="ap-section-icon">👤</div>
+            Players
+            <span className="ap-count-pill">{filteredPlayers.length}</span>
+          </div>
+          <div className="ap-toolbar">
+            <div className="ap-search-wrap">
+              <svg className="ap-search-icon" viewBox="0 0 20 20" fill="none">
+                <circle cx="8.5" cy="8.5" r="5.75" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M13 13l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <input
+                className="ap-search"
+                placeholder="Search by name, team, or position…"
+                value={playerSearch}
+                onChange={e => setPlayerSearch(e.target.value)}
+              />
+              {playerSearch && (
+                <button className="ap-search-clear" onClick={() => setPlayerSearch('')}>✕</button>
+              )}
+            </div>
+            <button className="ap-btn-primary ap-btn-sm" onClick={() => setShowAddModal(true)}>
+              + Add Player
+            </button>
+          </div>
+        </div>
+
+        {/* Position filter pills */}
+        <div className="ap-pos-filters">
+          {['ALL', ...POSITIONS].map(pos => (
+            <button
+              key={pos}
+              className={`ap-pos-pill ${posFilter === pos ? 'active' : ''} ${pos !== 'ALL' ? `pos-pill-${pos}` : ''}`}
+              onClick={() => setPosFilter(pos)}
+            >
+              {pos}
+            </button>
+          ))}
+        </div>
+
+        {loadingP ? (
+          <div className="ap-loading">Loading players…</div>
+        ) : (
+          <div className="ap-table-wrap">
+            <table className="ap-table">
+              <thead>
+                <tr>
+                  <th>Player</th><th>Pos</th><th>Team</th><th>Jersey</th><th>Age</th><th>Fant Pts</th><th>Actions</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {filteredPlayers.length === 0 ? (
+                  <tr><td colSpan={7} className="ap-empty">No players match your search.</td></tr>
+                ) : filteredPlayers.map(pl => (
+                  <tr key={pl._id}>
+                    <td className="ap-player-cell">
+                      {pl.headshotUrl
+                        ? <img src={pl.headshotUrl} alt="" className="ap-row-avatar"
+                            onError={e => e.target.style.display = 'none'} />
+                        : <div className="ap-row-avatar-ph">{pl.name.charAt(0)}</div>
+                      }
+                      <span className="ap-player-name">{pl.name}</span>
+                    </td>
+                    <td><span className={`pos-badge pos-${pl.position}`}>{pl.position}</span></td>
+                    <td className="ap-dim">{pl.teamAbbr || '—'}</td>
+                    <td className="ap-dim">{pl.jerseyNumber ? `#${pl.jerseyNumber}` : '—'}</td>
+                    <td className="ap-dim">{pl.age || '—'}</td>
+                    <td><span className="ap-fpts">{pl.fantasyPoints?.toFixed(1) ?? '—'}</span></td>
+                    <td>
+                      <div className="ap-actions">
+                        <button
+                          className="ap-btn-edit"
+                          onClick={() => navigate(`/admin/players/${pl._id}/edit`)}
+                        >Edit</button>
+                        <button
+                          className="ap-btn-delete"
+                          onClick={() => setDeleteTarget(pl)}
+                        >Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    </div>
-  );
-};
 
-// main admin page with tab switcher
-const Admin = () => {
-  const [tab, setTab] = useState('players');
-
-  return (
-    <div>
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: '800' }}>Admin Panel</h1>
-        <p style={{ color: 'var(--text-dim)', fontSize: '13px', marginTop: '2px' }}>
-          Manage players and stats for the 2024 NFL season.
-        </p>
-      </div>
-
-      <div className="tab-bar">
-        <button className={`tab-btn${tab === 'players' ? ' active' : ''}`} onClick={() => setTab('players')}>
-          Players
-        </button>
-        <button className={`tab-btn${tab === 'stats' ? ' active' : ''}`} onClick={() => setTab('stats')}>
-          Stats
-        </button>
-      </div>
-
-      {tab === 'players' && <PlayersTab />}
-      {tab === 'stats'   && <StatsTab />}
     </div>
   );
 };
