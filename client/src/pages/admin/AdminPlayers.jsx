@@ -3,23 +3,58 @@ import api from '../../services/api';
 import ConfirmModal from '../../components/ConfirmModal';
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
-const EMPTY = { name: '', position: 'QB', jerseyNumber: '', team: '', age: '', college: '', height: '', weight: '' };
+
+const EMPTY_PLAYER = {
+  name: '', position: 'QB', jerseyNumber: '', teamName: '', teamAbbr: '',
+  age: '', college: '', height: '', weight: '', headshotUrl: '', espnId: '',
+};
+
+const EMPTY_STATS = {
+  gamesPlayed: '', passingYards: '', passingTDs: '', interceptions: '',
+  rushingYards: '', rushingTDs: '', receivingYards: '', receivingTDs: '', receptions: '',
+};
+
+/* Which stat fields to show per position */
+const STAT_FIELDS_BY_POS = {
+  QB:  ['gamesPlayed', 'passingYards', 'passingTDs', 'interceptions', 'rushingYards', 'rushingTDs'],
+  RB:  ['gamesPlayed', 'rushingYards', 'rushingTDs', 'receptions', 'receivingYards', 'receivingTDs'],
+  WR:  ['gamesPlayed', 'receptions', 'receivingYards', 'receivingTDs'],
+  TE:  ['gamesPlayed', 'receptions', 'receivingYards', 'receivingTDs'],
+  K:   ['gamesPlayed'],
+  DEF: ['gamesPlayed'],
+};
+
+const STAT_LABELS = {
+  gamesPlayed:    'Games Played',
+  passingYards:   'Passing Yards',
+  passingTDs:     'Passing TDs',
+  interceptions:  'Interceptions',
+  rushingYards:   'Rushing Yards',
+  rushingTDs:     'Rushing TDs',
+  receptions:     'Receptions',
+  receivingYards: 'Receiving Yards',
+  receivingTDs:   'Receiving TDs',
+};
 
 const AdminPlayers = () => {
-  const [players, setPlayers] = useState([]);
-  const [teams, setTeams] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState(EMPTY);
+  const [players,      setPlayers]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [showModal,    setShowModal]    = useState(false);
+  const [editTarget,   setEditTarget]   = useState(null);
+  const [form,         setForm]         = useState(EMPTY_PLAYER);
+  const [stats,        setStats]        = useState(EMPTY_STATS);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
+  const [error,        setError]        = useState('');
+  const [search,       setSearch]       = useState('');
+
+  /* ESPN lookup state */
+  const [espnSearch,   setEspnSearch]   = useState('');
+  const [espnLoading,  setEspnLoading]  = useState(false);
+  const [espnError,    setEspnError]    = useState('');
 
   const load = async () => {
-    const [pRes, tRes] = await Promise.all([api.get('/api/players'), api.get('/api/teams')]);
+    const pRes = await api.get('/api/players');
     setPlayers(pRes.data);
-    setTeams(tRes.data);
     setLoading(false);
   };
 
@@ -27,7 +62,10 @@ const AdminPlayers = () => {
 
   const openCreate = () => {
     setEditTarget(null);
-    setForm({ ...EMPTY, team: teams[0]?._id || '' });
+    setForm(EMPTY_PLAYER);
+    setStats(EMPTY_STATS);
+    setEspnSearch('');
+    setEspnError('');
     setError('');
     setShowModal(true);
   };
@@ -35,24 +73,82 @@ const AdminPlayers = () => {
   const openEdit = (p) => {
     setEditTarget(p);
     setForm({
-      name: p.name, position: p.position, jerseyNumber: p.jerseyNumber || '',
-      team: p.team?._id || '', age: p.age || '', college: p.college || '',
-      height: p.height || '', weight: p.weight || '',
+      name: p.name, position: p.position,
+      jerseyNumber: p.jerseyNumber || '', teamName: p.teamName || '',
+      teamAbbr: p.teamAbbr || '', age: p.age || '',
+      college: p.college || '', height: p.height || '',
+      weight: p.weight || '', headshotUrl: p.headshotUrl || '',
+      espnId: p.espnId || '',
     });
+    setStats(EMPTY_STATS);
+    setEspnSearch('');
+    setEspnError('');
     setError('');
     setShowModal(true);
   };
 
+  /* ── ESPN auto-fill ── */
+  const handleEspnLookup = async () => {
+    if (!espnSearch.trim()) return;
+    setEspnLoading(true);
+    setEspnError('');
+    try {
+      const res = await api.get(`/api/players/espn-lookup?name=${encodeURIComponent(espnSearch.trim())}`);
+      const d   = res.data;
+
+      setForm((prev) => ({
+        ...prev,
+        name:         d.name         || prev.name,
+        position:     POSITIONS.includes(d.position) ? d.position : prev.position,
+        jerseyNumber: d.jerseyNumber ?? prev.jerseyNumber,
+        teamName:     d.teamName     || prev.teamName,
+        teamAbbr:     d.teamAbbr     || prev.teamAbbr,
+        age:          d.age          ?? prev.age,
+        college:      d.college      || prev.college,
+        headshotUrl:  d.headshotUrl  || prev.headshotUrl,
+        espnId:       d.espnId       || prev.espnId,
+      }));
+
+      if (d.stats && Object.keys(d.stats).length) {
+        setStats((prev) => ({
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(d.stats)
+              .filter(([k]) => k in EMPTY_STATS)
+              .map(([k, v]) => [k, v ?? ''])
+          ),
+        }));
+      }
+    } catch (err) {
+      setEspnError(err.response?.data?.message || 'Player not found on ESPN. Fill in manually.');
+    } finally {
+      setEspnLoading(false);
+    }
+  };
+
+  /* ── Submit: create or update ── */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     try {
-      const payload = { ...form, jerseyNumber: Number(form.jerseyNumber) || undefined, age: Number(form.age) || undefined, weight: Number(form.weight) || undefined };
+      const playerPayload = {
+        ...form,
+        jerseyNumber: Number(form.jerseyNumber) || undefined,
+        age:          Number(form.age)          || undefined,
+        weight:       Number(form.weight)       || undefined,
+      };
+
       if (editTarget) {
-        await api.put(`/api/players/${editTarget._id}`, payload);
+        /* update player info only (stats managed in AdminStats) */
+        await api.put(`/api/players/${editTarget._id}`, playerPayload);
       } else {
-        await api.post('/api/players', payload);
+        /* create player — pass stats so server auto-creates the Stat record */
+        const statsPayload = Object.fromEntries(
+          Object.entries(stats).map(([k, v]) => [k, v === '' ? 0 : Number(v)])
+        );
+        await api.post('/api/players', { ...playerPayload, stats: statsPayload });
       }
+
       setShowModal(false);
       load();
     } catch (err) {
@@ -66,6 +162,8 @@ const AdminPlayers = () => {
     load();
   };
 
+  const visibleStatFields = STAT_FIELDS_BY_POS[form.position] || ['gamesPlayed'];
+
   const filtered = players.filter((p) =>
     !search || p.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -76,7 +174,7 @@ const AdminPlayers = () => {
     <div>
       {deleteTarget && (
         <ConfirmModal
-          message="Delete this player? Their stat records and watchlist entries will remain but will be orphaned."
+          message="Delete this player? Their stats and watchlist appearances will also be permanently removed."
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
         />
@@ -89,8 +187,38 @@ const AdminPlayers = () => {
               <h3>{editTarget ? 'Edit Player' : 'Add Player'}</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
             </div>
+
+            {/* ── ESPN auto-fill (create only) ── */}
+            {!editTarget && (
+              <div className="espn-lookup-bar">
+                <div className="espn-lookup-label">Auto-fill from ESPN</div>
+                <div className="espn-lookup-row">
+                  <input
+                    className="form-input"
+                    placeholder="Search player name on ESPN…"
+                    value={espnSearch}
+                    onChange={(e) => setEspnSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleEspnLookup())}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleEspnLookup}
+                    disabled={espnLoading || !espnSearch.trim()}
+                  >
+                    {espnLoading ? 'Looking up…' : 'Look Up'}
+                  </button>
+                </div>
+                {espnError && <div className="espn-lookup-error">{espnError}</div>}
+              </div>
+            )}
+
             {error && <div className="auth-error">{error}</div>}
+
             <form onSubmit={handleSubmit}>
+
+              {/* ── Player info ── */}
+              <div className="modal-section-label">Player Info</div>
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Full Name</label>
@@ -106,55 +234,104 @@ const AdminPlayers = () => {
                   </select>
                 </div>
               </div>
+
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Team</label>
-                  <select className="form-select" value={form.team}
-                    onChange={(e) => setForm({ ...form, team: e.target.value })} required>
-                    <option value="">Select team...</option>
-                    {teams.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
-                  </select>
+                  <label className="form-label">Team Name</label>
+                  <input className="form-input" value={form.teamName}
+                    onChange={(e) => setForm({ ...form, teamName: e.target.value })}
+                    placeholder="e.g. Kansas City Chiefs" />
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Team Abbr</label>
+                  <input className="form-input" value={form.teamAbbr}
+                    onChange={(e) => setForm({ ...form, teamAbbr: e.target.value.toUpperCase() })}
+                    placeholder="e.g. KC" maxLength={5} />
+                </div>
+              </div>
+
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Jersey Number</label>
                   <input className="form-input" type="number" value={form.jerseyNumber}
                     onChange={(e) => setForm({ ...form, jerseyNumber: e.target.value })}
                     placeholder="e.g. 15" min={1} max={99} />
                 </div>
-              </div>
-              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Age</label>
                   <input className="form-input" type="number" value={form.age}
-                    onChange={(e) => setForm({ ...form, age: e.target.value })} placeholder="e.g. 28" />
+                    onChange={(e) => setForm({ ...form, age: e.target.value })}
+                    placeholder="e.g. 28" />
                 </div>
+              </div>
+
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">College</label>
                   <input className="form-input" value={form.college}
-                    onChange={(e) => setForm({ ...form, college: e.target.value })} placeholder="e.g. Alabama" />
+                    onChange={(e) => setForm({ ...form, college: e.target.value })}
+                    placeholder="e.g. Texas Tech" />
                 </div>
-              </div>
-              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Height</label>
                   <input className="form-input" value={form.height}
-                    onChange={(e) => setForm({ ...form, height: e.target.value })} placeholder='e.g. 6&apos;3"' />
+                    onChange={(e) => setForm({ ...form, height: e.target.value })}
+                    placeholder='e.g. 6&apos;2"' />
                 </div>
+              </div>
+
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Weight (lbs)</label>
                   <input className="form-input" type="number" value={form.weight}
-                    onChange={(e) => setForm({ ...form, weight: e.target.value })} placeholder="e.g. 220" />
+                    onChange={(e) => setForm({ ...form, weight: e.target.value })}
+                    placeholder="e.g. 230" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Headshot URL</label>
+                  <input className="form-input" value={form.headshotUrl}
+                    onChange={(e) => setForm({ ...form, headshotUrl: e.target.value })}
+                    placeholder="https://…" />
                 </div>
               </div>
+
+              {/* ── Season stats (create only) ── */}
+              {!editTarget && (
+                <>
+                  <div className="modal-section-label" style={{ marginTop: '20px' }}>
+                    2024 Season Stats
+                    <span className="modal-section-hint">Auto-filled from ESPN if found above</span>
+                  </div>
+                  <div className="form-row" style={{ flexWrap: 'wrap' }}>
+                    {visibleStatFields.map((field) => (
+                      <div className="form-group" key={field}>
+                        <label className="form-label">{STAT_LABELS[field]}</label>
+                        <input
+                          className="form-input"
+                          type="number"
+                          min={0}
+                          value={stats[field]}
+                          onChange={(e) => setStats({ ...stats, [field]: e.target.value })}
+                          placeholder="0"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <div className="modal-footer">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editTarget ? 'Save Changes' : 'Add Player'}</button>
+                <button type="submit" className="btn btn-primary">
+                  {editTarget ? 'Save Changes' : 'Add Player'}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* ── Page header ── */}
       <div className="page-header">
         <div className="page-header-left">
           <h1>Manage Players</h1>
@@ -181,21 +358,16 @@ const AdminPlayers = () => {
           <tbody>
             {filtered.map((p) => (
               <tr key={p._id}>
-                <td><span className="player-number">#{p.jerseyNumber}</span></td>
+                <td><span className="player-number">#{p.jerseyNumber || '—'}</span></td>
                 <td style={{ fontWeight: '600' }}>{p.name}</td>
                 <td><span className={`pos-badge pos-${p.position}`}>{p.position}</span></td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="team-dot" style={{ background: p.team?.primaryColor || '#666' }} />
-                    <span style={{ color: 'var(--text-dim)' }}>{p.team?.abbreviation}</span>
-                  </div>
-                </td>
-                <td style={{ color: 'var(--text-dim)' }}>{p.age}</td>
+                <td style={{ color: 'var(--text-dim)' }}>{p.teamAbbr || p.teamName || '—'}</td>
+                <td style={{ color: 'var(--text-dim)' }}>{p.age || '—'}</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{p.college || '—'}</td>
                 <td>
                   <div className="td-actions">
                     <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Edit</button>
-                    <button className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(p._id)}>Delete</button>
+                    <button className="btn btn-danger btn-sm"    onClick={() => setDeleteTarget(p._id)}>Delete</button>
                   </div>
                 </td>
               </tr>

@@ -1258,3 +1258,55 @@ input, textarea, select { font-family: inherit; }
   .login-form-side             { min-height: 100vh; }
   .login-form-side::before     { display: none; }
 }
+
+/* ===== ADMIN PLAYER MODAL ADDITIONS ===== */
+
+/* ESPN lookup bar */
+.espn-lookup-bar {
+  background: rgba(59,130,246,0.06);
+  border: 1px solid rgba(59,130,246,0.22);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.espn-lookup-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.espn-lookup-row {
+  display: flex;
+  gap: 8px;
+}
+.espn-lookup-row .form-input { flex: 1; }
+.espn-lookup-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent-red);
+}
+
+/* Modal section divider labels */
+.modal-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.modal-section-hint {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent);
+  opacity: 0.8;
+}
