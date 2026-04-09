@@ -25,8 +25,24 @@ const NFL_TEAMS = [
   { abbr: 'TEN', name: 'Tennessee Titans' },      { abbr: 'WSH', name: 'Washington Commanders' },
 ];
 
-const EMPTY_PLAYER = { name: '', position: 'QB', jerseyNumber: '', teamAbbr: '', age: '', headshotUrl: '', espnId: '' };
-const EMPTY_STATS  = { gamesPlayed: '', passingYards: '', passingTDs: '', interceptions: '', rushingYards: '', rushingTDs: '', receivingYards: '', receivingTDs: '', receptions: '' };
+const EMPTY_PLAYER    = { name: '', position: 'QB', jerseyNumber: '', teamAbbr: '', age: '', headshotUrl: '', espnId: '' };
+const SEASON_TABS     = [2024, 2023, 2022, 2021];
+const EMPTY_STAT_FORM = { inactive: true, gamesPlayed: 0, passingYards: 0, passingTDs: 0, interceptions: 0, rushingYards: 0, rushingTDs: 0, receivingYards: 0, receivingTDs: 0, receptions: 0 };
+
+const buildEmptySeasonForms = () => {
+  const obj = {};
+  for (const y of SEASON_TABS) obj[y] = { ...EMPTY_STAT_FORM };
+  obj[2024] = { ...EMPTY_STAT_FORM, inactive: false }; // 2024 active by default
+  return obj;
+};
+
+const calcPPR = (pos, sf) => {
+  if (sf.inactive) return 0;
+  const v = k => Number(sf[k]) || 0;
+  if (pos === 'QB') return +(v('passingYards')*0.04+v('passingTDs')*4-v('interceptions')*2+v('rushingYards')*0.1+v('rushingTDs')*6).toFixed(1);
+  if (pos === 'RB') return +(v('rushingYards')*0.1+v('rushingTDs')*6+v('receptions')+v('receivingYards')*0.1+v('receivingTDs')*6).toFixed(1);
+  return +(v('receptions')+v('receivingYards')*0.1+v('receivingTDs')*6+v('rushingYards')*0.1+v('rushingTDs')*6).toFixed(1);
+};
 
 const STAT_GROUPS = {
   QB: [
@@ -61,14 +77,18 @@ const STAT_GROUPS = {
 
 /* ─── Add Player Modal (create-only, 2-step) ─────────────── */
 const AddPlayerModal = ({ onClose, onSaved }) => {
-  const [step,      setStep]      = useState(1);
-  const [form,      setForm]      = useState({ ...EMPTY_PLAYER });
-  const [statForm,  setStatForm]  = useState({ ...EMPTY_STATS });
-  const [espnQuery, setEspnQuery] = useState('');
-  const [espnState, setEspnState] = useState('idle');
-  const [espnMsg,   setEspnMsg]   = useState('');
-  const [error,     setError]     = useState('');
-  const [saving,    setSaving]    = useState(false);
+  const [step,         setStep]         = useState(1);
+  const [form,         setForm]         = useState({ ...EMPTY_PLAYER });
+  const [seasonForms,  setSeasonForms]  = useState(buildEmptySeasonForms());
+  const [activeTab,    setActiveTab]    = useState(2024);
+  const [espnQuery,    setEspnQuery]    = useState('');
+  const [espnState,    setEspnState]    = useState('idle');
+  const [espnMsg,      setEspnMsg]      = useState('');
+  const [error,        setError]        = useState('');
+  const [saving,       setSaving]       = useState(false);
+
+  const updateSeason = (year, key, val) =>
+    setSeasonForms(prev => ({ ...prev, [year]: { ...prev[year], [key]: val } }));
 
   const handleEspnLookup = async () => {
     if (!espnQuery.trim()) return;
@@ -86,14 +106,19 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
         headshotUrl:  d.headshotUrl  || prev.headshotUrl,
         espnId:       d.espnId       || prev.espnId,
       }));
+      // Populate ESPN stats into the 2024 season tab
       if (d.stats && Object.keys(d.stats).length) {
-        setStatForm(prev => ({
+        setSeasonForms(prev => ({
           ...prev,
-          ...Object.fromEntries(
-            Object.entries(d.stats)
-              .filter(([k]) => k in EMPTY_STATS)
-              .map(([k, v]) => [k, v ?? ''])
-          ),
+          2024: {
+            ...prev[2024],
+            inactive: false,
+            ...Object.fromEntries(
+              Object.entries(d.stats)
+                .filter(([k]) => k in EMPTY_STAT_FORM && k !== 'inactive')
+                .map(([k, v]) => [k, v ?? 0])
+            ),
+          },
         }));
       }
       setEspnState('success');
@@ -108,16 +133,38 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
     setError(''); setSaving(true);
     try {
       const team = NFL_TEAMS.find(t => t.abbr === form.teamAbbr);
-      const payload = {
+      const playerPayload = {
         ...form,
-        teamName: team?.name || '',
+        teamName:     team?.name || '',
         jerseyNumber: Number(form.jerseyNumber) || undefined,
-        age: Number(form.age) || undefined,
+        age:          Number(form.age)          || undefined,
       };
-      const statsPayload = Object.fromEntries(
-        Object.entries(statForm).map(([k, v]) => [k, v === '' ? 0 : Number(v)])
-      );
-      await api.post('/api/players', { ...payload, stats: statsPayload });
+
+      // Step 1: create the player
+      const created = await api.post('/api/players', playerPayload);
+      const newId = created.data._id;
+
+      // Step 2: batch-upsert all 4 seasons via the full endpoint
+      const statsArray = SEASON_TABS.map(year => {
+        const sf = seasonForms[year];
+        if (sf.inactive) return { season: year, inactive: true };
+        return {
+          season:         year,
+          inactive:       false,
+          gamesPlayed:    Number(sf.gamesPlayed)    || 0,
+          passingYards:   Number(sf.passingYards)   || 0,
+          passingTDs:     Number(sf.passingTDs)     || 0,
+          interceptions:  Number(sf.interceptions)  || 0,
+          rushingYards:   Number(sf.rushingYards)   || 0,
+          rushingTDs:     Number(sf.rushingTDs)     || 0,
+          receivingYards: Number(sf.receivingYards) || 0,
+          receivingTDs:   Number(sf.receivingTDs)   || 0,
+          receptions:     Number(sf.receptions)     || 0,
+        };
+      });
+
+      await api.put(`/api/players/${newId}/full`, { player: playerPayload, stats: statsArray });
+
       onSaved();
       onClose();
     } catch (err) {
@@ -125,7 +172,9 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
     } finally { setSaving(false); }
   };
 
+  const sf        = seasonForms[activeTab] || EMPTY_STAT_FORM;
   const statFields = STAT_GROUPS[form.position] || STAT_GROUPS.WR;
+  const livePPR   = calcPPR(form.position, sf);
 
   return (
     <div className="ap-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -238,28 +287,70 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
             </div>
           )}
 
-          {/* Step 2 — Stats */}
+          {/* Step 2 — Multi-Season Stats */}
           {step === 2 && (
             <div>
               <div className="ap-stats-intro">
                 <span className={`pos-badge pos-${form.position}`}>{form.position}</span>
-                &nbsp; Stat fields for <strong>{form.name || 'this player'}</strong> — 2024 Season
+                &nbsp; Stats for <strong>{form.name || 'this player'}</strong> — toggle seasons active/inactive
               </div>
-              <div className="ap-stat-grid">
-                {statFields.map((f, i) => {
-                  const isFirst = i === 0 || f.group !== statFields[i - 1]?.group;
+
+              {/* Season tabs */}
+              <div className="ep-season-tabs" style={{ marginBottom: 0 }}>
+                {SEASON_TABS.map(year => {
+                  const yf = seasonForms[year];
                   return (
-                    <div key={f.key} className={`ap-stat-field ${i === 0 ? 'ap-stat-gp' : ''}`}>
-                      {isFirst && f.group && <div className="ap-stat-group-label">{f.group}</div>}
-                      <label className="ap-label">
-                        <span className="ap-stat-icon">{f.icon}</span> {f.label}
-                      </label>
-                      <input className="ap-input ap-stat-input" type="number" min={0} placeholder="0"
-                        value={statForm[f.key]}
-                        onChange={e => setStatForm({ ...statForm, [f.key]: e.target.value })} />
-                    </div>
+                    <button
+                      key={year}
+                      className={`ep-season-tab${activeTab === year ? ' active' : ''}`}
+                      onClick={() => setActiveTab(year)}
+                    >
+                      {year}
+                      {!yf.inactive && <span className="ep-tab-dot" />}
+                    </button>
                   );
                 })}
+              </div>
+
+              {/* Active season content */}
+              <div className="ep-season-content" style={{ borderTop: 'none' }}>
+                {/* Inactive toggle + live PPR */}
+                <div className="ep-season-controls">
+                  <label className="ep-season-inactive-toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!sf.inactive}
+                      onChange={e => updateSeason(activeTab, 'inactive', e.target.checked)}
+                    />
+                    <span>Not Active This Season</span>
+                    {sf.inactive && <span className="ep-inactive-badge">INACTIVE</span>}
+                  </label>
+                  <div className="ep-ppr-preview" style={{ margin: 0 }}>
+                    PPR:&nbsp;<span className="ep-ppr-value">{livePPR.toFixed(1)}</span>
+                  </div>
+                </div>
+
+                {/* Stat fields */}
+                <div className={`ap-stat-grid${sf.inactive ? ' ep-stat-inactive' : ''}`}>
+                  {statFields.map((f, i) => {
+                    const isFirst = i === 0 || f.group !== statFields[i - 1]?.group;
+                    return (
+                      <div key={f.key} className={`ap-stat-field ${i === 0 ? 'ap-stat-gp' : ''}`}>
+                        {isFirst && f.group && <div className="ap-stat-group-label">{f.group}</div>}
+                        <label className="ap-label">
+                          <span className="ap-stat-icon">{f.icon}</span> {f.label}
+                        </label>
+                        <input
+                          className="ap-input ap-stat-input"
+                          type="number" min={0} placeholder="0"
+                          value={sf[f.key] ?? 0}
+                          disabled={sf.inactive}
+                          onChange={e => updateSeason(activeTab, f.key, e.target.value)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
