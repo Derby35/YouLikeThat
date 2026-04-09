@@ -105,69 +105,57 @@ const lookupEspnPlayer = async (req, res) => {
       if (teamIdMatch) teamAbbr = ESPN_TEAM[Number(teamIdMatch[1])] || '';
     } catch (_) { /* non-critical */ }
 
-    /* 3 – stats overview → Regular Season stats + position inference
-       ESPN's overview has two parallel structures we mine:
-         a) statistics.names + statistics.splits[].stats  (flat)
-         b) statistics.categories[].names + categories[].values (grouped)
-       We try both so nothing is missed, including gamesPlayed.       */
-    let parsedStats = {};
-    let position    = '';
-    try {
-      const overviewUrl  = `https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${espnId}/overview`;
-      const overviewData = await fetchJson(overviewUrl);
-      const statObj      = overviewData?.statistics;
-
-      if (statObj) {
-        /* ── a) flat names + splits ── */
-        const flatNames = statObj.names || statObj.labels || [];
-        const splits    = statObj.splits || [];
-        const regSeason = splits.find(s => /regular/i.test(s.displayName)) || splits[0];
-        if (regSeason && flatNames.length) {
-          const vals = regSeason.stats || regSeason.values || [];
-          flatNames.forEach((statName, idx) => {
-            const ourField = ESPN_STAT_MAP[statName];
-            if (ourField && vals[idx] !== undefined) {
-              const num = parseFloat(String(vals[idx]).replace(/,/g, ''));
-              if (!isNaN(num)) parsedStats[ourField] = Math.round(num);
-            }
-          });
-        }
-
-        /* ── b) category breakdown (passing / rushing / receiving) ── */
-        const cats = statObj.categories || [];
-        cats.forEach(cat => {
-          const catNames  = cat.names  || cat.labels || [];
-          const catVals   = cat.values || cat.stats  || [];
-          catNames.forEach((statName, idx) => {
-            const ourField = ESPN_STAT_MAP[statName];
-            if (ourField && catVals[idx] !== undefined) {
-              const num = parseFloat(String(catVals[idx]).replace(/,/g, ''));
-              if (!isNaN(num)) parsedStats[ourField] = Math.round(num);
-            }
-          });
+    /* 3 – fetch stats for all 4 seasons via ESPN's core stats API.
+       Endpoint: /v2/sports/football/leagues/nfl/seasons/{year}/types/2/athletes/{id}/statistics/0
+       This returns categories with named stat objects that match our schema directly. */
+    const fetchSeasonStats = async (year) => {
+      const url  = `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/${year}/types/2/athletes/${espnId}/statistics/0`;
+      const data = await fetchJson(url);
+      const result = {};
+      const cats   = data?.splits?.categories || [];
+      cats.forEach(cat => {
+        (cat.stats || []).forEach(stat => {
+          const ourField = ESPN_STAT_MAP[stat.name];
+          if (ourField && stat.value !== undefined && stat.value !== null) {
+            const num = parseFloat(stat.value);
+            if (!isNaN(num)) result[ourField] = Math.round(num);
+          }
         });
+      });
+      return { result, cats };
+    };
 
-        /* ── c) gamesPlayed explicit fallback ─────────────────────
-           ESPN often stores GP at the top level of the statObj or
-           inside the first split's displayValue map.              */
-        if (!parsedStats.gamesPlayed) {
-          const gp =
-            statObj.gamesPlayed             ??
-            statObj.splits?.[0]?.gamesPlayed??
-            overviewData?.athlete?.statistics?.gamesPlayed;
-          if (gp != null) parsedStats.gamesPlayed = Math.round(Number(gp));
+    let position = '';
+    const allSeasonStats = {};
+    const YEARS = [2024, 2023, 2022, 2021];
+
+    for (const year of YEARS) {
+      try {
+        const { result, cats } = await fetchSeasonStats(year);
+
+        /* derive position from categories once */
+        if (!position && cats.length) {
+          const catNames = cats.map(c => (c.name || '').toLowerCase());
+          const passStats = cats.find(c => c.name === 'passing')?.stats || [];
+          const passYds   = passStats.find(s => s.name === 'passingYards')?.value || 0;
+          const recStats  = cats.find(c => c.name === 'receiving')?.stats || [];
+          const recYds    = recStats.find(s => s.name === 'receivingYards')?.value || 0;
+          const rushStats = cats.find(c => c.name === 'rushing')?.stats || [];
+          const rushYds   = rushStats.find(s => s.name === 'rushingYards')?.value || 0;
+
+          if (passYds > 100)       position = 'QB';
+          else if (recYds > rushYds) position = 'WR';
+          else if (rushYds > 0)    position = 'RB';
         }
 
-        /* ── position from category names ── */
-        const catNames = cats.map(c => (c.name || c.displayName || '').toLowerCase());
-        if (catNames.some(n => n.includes('passing')))           position = 'QB';
-        else if (catNames.some(n => n.includes('rushing')) &&
-                 !catNames.some(n => n.includes('receiving')))   position = 'RB';
-        else if (catNames.some(n => n.includes('receiving')))    position = 'WR';
-
-        parsedStats.fantasyPoints = parseFloat(calcFantasyPoints(parsedStats).toFixed(1));
-      }
-    } catch (_) { /* non-critical — stats stay empty */ }
+        /* only store year if at least one meaningful stat is non-zero */
+        const hasData = Object.keys(result).some(k => k !== 'fantasyPoints' && result[k] > 0);
+        if (hasData) {
+          result.fantasyPoints = parseFloat(calcFantasyPoints(result).toFixed(1));
+          allSeasonStats[year] = result;
+        }
+      } catch (_) { /* year not available for this player — skip */ }
+    }
 
     res.json({
       espnId,
@@ -181,7 +169,8 @@ const lookupEspnPlayer = async (req, res) => {
       headshotUrl,
       teamName,
       teamAbbr,
-      stats: parsedStats,
+      stats:          allSeasonStats[2024] || {},   // backwards compat
+      allSeasonStats,                                // all years
     });
   } catch (err) {
     res.status(500).json({ message: 'ESPN lookup failed', error: err.message });

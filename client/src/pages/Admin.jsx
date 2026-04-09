@@ -106,23 +106,31 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
         headshotUrl:  d.headshotUrl  || prev.headshotUrl,
         espnId:       d.espnId       || prev.espnId,
       }));
-      // Populate ESPN stats into the 2024 season tab
-      const statsKeys = d.stats ? Object.entries(d.stats).filter(([k]) => k in EMPTY_STAT_FORM && k !== 'inactive') : [];
-      if (statsKeys.length) {
-        setSeasonForms(prev => ({
-          ...prev,
-          2024: {
-            ...prev[2024],
-            inactive: false,
-            ...Object.fromEntries(statsKeys.map(([k, v]) => [k, v ?? 0])),
-          },
-        }));
-        setActiveTab(2024); // jump to 2024 so the user sees the filled stats
+      // Populate all available seasons from ESPN into season tabs
+      const allSeasonStats = d.allSeasonStats || {};
+      const yearsFound = Object.keys(allSeasonStats).map(Number);
+      if (yearsFound.length) {
+        setSeasonForms(prev => {
+          const next = { ...prev };
+          for (const year of SEASON_TABS) {
+            const espnYear = allSeasonStats[year];
+            if (espnYear) {
+              const fields = Object.fromEntries(
+                Object.entries(espnYear)
+                  .filter(([k]) => k in EMPTY_STAT_FORM && k !== 'inactive')
+                  .map(([k, v]) => [k, v ?? 0])
+              );
+              next[year] = { ...prev[year], inactive: false, ...fields };
+            }
+          }
+          return next;
+        });
+        setActiveTab(Math.max(...yearsFound)); // jump to most recent year with data
       }
       setEspnState('success');
       setEspnMsg(
-        statsKeys.length
-          ? `Found: ${d.name || espnQuery} — 2024 stats loaded, check the 2024 tab`
+        yearsFound.length
+          ? `Found: ${d.name || espnQuery} — stats loaded for ${yearsFound.sort((a,b)=>b-a).join(', ')}`
           : `Found: ${d.name || espnQuery} — no stats returned, enter manually`
       );
     } catch (err) {
