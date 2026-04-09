@@ -107,22 +107,24 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
         espnId:       d.espnId       || prev.espnId,
       }));
       // Populate ESPN stats into the 2024 season tab
-      if (d.stats && Object.keys(d.stats).length) {
+      const statsKeys = d.stats ? Object.entries(d.stats).filter(([k]) => k in EMPTY_STAT_FORM && k !== 'inactive') : [];
+      if (statsKeys.length) {
         setSeasonForms(prev => ({
           ...prev,
           2024: {
             ...prev[2024],
             inactive: false,
-            ...Object.fromEntries(
-              Object.entries(d.stats)
-                .filter(([k]) => k in EMPTY_STAT_FORM && k !== 'inactive')
-                .map(([k, v]) => [k, v ?? 0])
-            ),
+            ...Object.fromEntries(statsKeys.map(([k, v]) => [k, v ?? 0])),
           },
         }));
+        setActiveTab(2024); // jump to 2024 so the user sees the filled stats
       }
       setEspnState('success');
-      setEspnMsg(`Found: ${d.name || espnQuery}`);
+      setEspnMsg(
+        statsKeys.length
+          ? `Found: ${d.name || espnQuery} — 2024 stats loaded, check the 2024 tab`
+          : `Found: ${d.name || espnQuery} — no stats returned, enter manually`
+      );
     } catch (err) {
       setEspnState('error');
       setEspnMsg(err.response?.data?.message || 'Not found — fill in manually.');
