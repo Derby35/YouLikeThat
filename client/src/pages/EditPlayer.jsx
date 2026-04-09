@@ -196,23 +196,30 @@ const EditPlayer = () => {
         age:          form.age          !== '' ? Number(form.age)          : undefined,
       };
 
-      const statsArray = SEASON_TABS.map(year => {
-        const sf = seasonForms[year];
-        if (sf.inactive) return { season: year, inactive: true };
-        return {
-          season:        year,
-          inactive:      false,
-          gamesPlayed:   Number(sf.gamesPlayed)   || 0,
-          passingYards:  Number(sf.passingYards)  || 0,
-          passingTDs:    Number(sf.passingTDs)    || 0,
-          interceptions: Number(sf.interceptions) || 0,
-          rushingYards:  Number(sf.rushingYards)  || 0,
-          rushingTDs:    Number(sf.rushingTDs)    || 0,
-          receivingYards:Number(sf.receivingYards)|| 0,
-          receivingTDs:  Number(sf.receivingTDs)  || 0,
-          receptions:    Number(sf.receptions)    || 0,
-        };
-      });
+      const statsArray = SEASON_TABS.reduce((acc, year) => {
+        const sf   = seasonForms[year];
+        const orig = origSeasonForms?.[year];
+        // Skip seasons that were never in the DB and the user never activated
+        if (sf.inactive && orig?.inactive) return acc;
+        if (sf.inactive) {
+          acc.push({ season: year, inactive: true });
+        } else {
+          acc.push({
+            season:        year,
+            inactive:      false,
+            gamesPlayed:   Number(sf.gamesPlayed)    || 0,
+            passingYards:  Number(sf.passingYards)   || 0,
+            passingTDs:    Number(sf.passingTDs)     || 0,
+            interceptions: Number(sf.interceptions)  || 0,
+            rushingYards:  Number(sf.rushingYards)   || 0,
+            rushingTDs:    Number(sf.rushingTDs)     || 0,
+            receivingYards:Number(sf.receivingYards) || 0,
+            receivingTDs:  Number(sf.receivingTDs)   || 0,
+            receptions:    Number(sf.receptions)     || 0,
+          });
+        }
+        return acc;
+      }, []);
 
       await api.put(`/api/players/${id}/full`, { player: playerPayload, stats: statsArray });
 

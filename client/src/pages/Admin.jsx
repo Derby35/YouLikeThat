@@ -144,24 +144,26 @@ const AddPlayerModal = ({ onClose, onSaved }) => {
       const created = await api.post('/api/players', playerPayload);
       const newId = created.data._id;
 
-      // Step 2: batch-upsert all 4 seasons via the full endpoint
-      const statsArray = SEASON_TABS.map(year => {
+      // Step 2: batch-upsert only active seasons (skip inactive — nothing to delete on a new player)
+      const statsArray = SEASON_TABS.reduce((acc, year) => {
         const sf = seasonForms[year];
-        if (sf.inactive) return { season: year, inactive: true };
-        return {
-          season:         year,
-          inactive:       false,
-          gamesPlayed:    Number(sf.gamesPlayed)    || 0,
-          passingYards:   Number(sf.passingYards)   || 0,
-          passingTDs:     Number(sf.passingTDs)     || 0,
-          interceptions:  Number(sf.interceptions)  || 0,
-          rushingYards:   Number(sf.rushingYards)   || 0,
-          rushingTDs:     Number(sf.rushingTDs)     || 0,
-          receivingYards: Number(sf.receivingYards) || 0,
-          receivingTDs:   Number(sf.receivingTDs)   || 0,
-          receptions:     Number(sf.receptions)     || 0,
-        };
-      });
+        if (!sf.inactive) {
+          acc.push({
+            season:         year,
+            inactive:       false,
+            gamesPlayed:    Number(sf.gamesPlayed)    || 0,
+            passingYards:   Number(sf.passingYards)   || 0,
+            passingTDs:     Number(sf.passingTDs)     || 0,
+            interceptions:  Number(sf.interceptions)  || 0,
+            rushingYards:   Number(sf.rushingYards)   || 0,
+            rushingTDs:     Number(sf.rushingTDs)     || 0,
+            receivingYards: Number(sf.receivingYards) || 0,
+            receivingTDs:   Number(sf.receivingTDs)   || 0,
+            receptions:     Number(sf.receptions)     || 0,
+          });
+        }
+        return acc;
+      }, []);
 
       await api.put(`/api/players/${newId}/full`, { player: playerPayload, stats: statsArray });
 
